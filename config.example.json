@@ -1,6 +1,7 @@
 {
     "hotkey": "f2",
     "exit_hotkey": "f12",
+    "region_hotkey": "f3",
     "error_threshold": 12.0,
     "top2_gap_threshold": 2.5,
     "use_hist_equalization": false,

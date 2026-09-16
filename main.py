@@ -54,7 +54,7 @@ import cv2
 import numpy as np
 import mss
 import keyboard
-from PyQt5.QtCore import Qt, QPoint, QSharedMemory, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QPoint, QRect, QSharedMemory, QThread, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
@@ -127,6 +127,7 @@ logger = logging.getLogger("MapMatcher")
 DEFAULT_CONFIG = {
     "hotkey": "f2",
     "exit_hotkey": "f12",
+    "region_hotkey": "f3",    # 进入截图区域框选模式（可视化选择 door_coords）
     "error_threshold": 12.0,
     "top2_gap_threshold": 2.5,
     "use_hist_equalization": True,
@@ -223,10 +224,14 @@ def _merge_config(raw):
 
 def _sanitize_config():
     """校验关键配置，非法值一律回退默认值，防止用户手改配置把程序搞崩。"""
-    for key in ("hotkey", "exit_hotkey"):
+    for key in ("hotkey", "exit_hotkey", "region_hotkey"):
         if CONFIG.get(key) not in VALID_HOTKEYS:
             logger.warning("%s = %r 非法，已重置为 %s。", key, CONFIG.get(key), DEFAULT_CONFIG[key])
             CONFIG[key] = DEFAULT_CONFIG[key]
+    # 三个热键不能两两相同
+    if CONFIG["region_hotkey"] in (CONFIG["hotkey"], CONFIG["exit_hotkey"]):
+        logger.warning("region_hotkey 与识别/退出热键冲突，已重置为 %s。", DEFAULT_CONFIG["region_hotkey"])
+        CONFIG["region_hotkey"] = DEFAULT_CONFIG["region_hotkey"]
 
     for key in ("ref_width", "ref_height", "error_threshold", "top2_gap_threshold"):
         value = _to_float(CONFIG.get(key))
@@ -784,12 +789,88 @@ class MatcherWorker(QThread):
 # ==============================================================================
 # 6. 悬浮窗与托盘：位置记忆 + 鼠标穿透 + 结果可视化
 # ==============================================================================
+
+class RegionSelector(QWidget):
+    """全屏半透明遮罩，鼠标拖拽框选截图区域；Enter/双击确认，Esc 取消。"""
+
+    def __init__(self, overlay, parent=None):
+        super().__init__(parent)
+        self._overlay = overlay
+        self._start = QPoint()
+        self._end = QPoint()
+        self._dragging = False
+
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        geo = QApplication.primaryScreen().geometry()
+        self.setGeometry(geo)
+        self.setCursor(Qt.CrossCursor)
+        self.setWindowTitle("MapMatcher - 选择截图区域")
+
+    def mousePressEvent(self, event):
+        self._start = event.globalPos()
+        self._end = self._start
+        self._dragging = True
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            self._end = event.globalPos()
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging:
+            self._end = event.globalPos()
+            self._dragging = False
+            self.update()
+
+    def mouseDoubleClickEvent(self, event):
+        self._confirm()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self._confirm()
+        elif event.key() == Qt.Key_Escape:
+            self.close()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+        rect = self._norm_rect()
+        if rect.width() > 4 and rect.height() > 4:
+            # 挖空选框，露出底下游戏画面，方便对齐
+            painter.setCompositionMode(QPainter.CompositionMode_Clear)
+            painter.fillRect(rect, Qt.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            painter.setPen(QPen(QColor(255, 90, 90), 2))
+            painter.drawRect(rect)
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(rect.x() + 4, rect.y() + rect.height() - 8,
+                             "%d×%d @ (%d, %d)" % (rect.width(), rect.height(), rect.x(), rect.y()))
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(16, 28, "拖拽选择截图区域 ｜ Enter / 双击 确认 ｜ Esc 取消")
+
+    def _norm_rect(self):
+        x1, y1 = self._start.x(), self._start.y()
+        x2, y2 = self._end.x(), self._end.y()
+        return QRect(min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+
+    def _confirm(self):
+        rect = self._norm_rect()
+        if rect.width() < 8 or rect.height() < 8:
+            self.close()
+            return
+        self._overlay.apply_region(rect.x(), rect.y(), rect.width(), rect.height())
+        self.close()
+
+
 class OverlayWindow(QWidget):
     """鼠标穿透的悬浮窗，附带托盘菜单。"""
 
     # keyboard 的回调运行在它自己的钩子线程里，必须经信号投递到 GUI 线程执行
     sig_trigger = pyqtSignal()
     sig_quit = pyqtSignal()
+    sig_select_region = pyqtSignal()
 
     def __init__(self, matcher, parent=None):
         super().__init__(parent)
@@ -817,6 +898,7 @@ class OverlayWindow(QWidget):
 
         self.sig_trigger.connect(self.worker.trigger)
         self.sig_quit.connect(self.close_program)
+        self.sig_select_region.connect(self.open_region_selector)
 
     # ---------------- 界面 ----------------
     def _build_ui(self):
@@ -858,12 +940,15 @@ class OverlayWindow(QWidget):
         self.tray_menu = QMenu(self)
         action_show = QAction("显示 / 隐藏悬浮窗", self)
         action_reload = QAction("重新加载地图模板", self)
+        action_region = QAction("选择截图区域", self)
         action_quit = QAction("退出程序", self)
         action_show.triggered.connect(self.toggle_window)
         action_reload.triggered.connect(self.reload_templates)
+        action_region.triggered.connect(self.open_region_selector)
         action_quit.triggered.connect(self.close_program)
         self.tray_menu.addAction(action_show)
         self.tray_menu.addAction(action_reload)
+        self.tray_menu.addAction(action_region)
         self.tray_menu.addSeparator()
         self.tray_menu.addAction(action_quit)
 
@@ -958,6 +1043,32 @@ class OverlayWindow(QWidget):
             self.tray_icon.hide()
             QApplication.quit()
 
+    # ---------------- 截图区域框选 ----------------
+    def open_region_selector(self):
+        """进入全屏框选模式，让用户拖拽选择截图区域（替代写死的 door_coords）。"""
+        if getattr(self, "_selector", None) and self._selector.isVisible():
+            return
+        self._selector = RegionSelector(self, self)
+        self._selector.show()
+
+    def apply_region(self, left, top, width, height):
+        """把用户框选的屏幕真实像素区域写入配置并刷新抓图缓存。"""
+        try:
+            with new_mss() as sct:
+                monitor = sct.monitors[1]
+                sw, sh = int(monitor["width"]), int(monitor["height"])
+        except Exception as exc:
+            logger.warning("获取屏幕分辨率失败（%s），以选框推断参考分辨率。", exc)
+            sw, sh = left + width, top + height
+        CONFIG["door_coords"] = {"left": int(left), "top": int(top),
+                                 "width": int(width), "height": int(height)}
+        CONFIG["ref_width"], CONFIG["ref_height"] = sw, sh
+        save_config()
+        get_screen_crop(force_refresh=True)
+        msg = "截图区域已更新：%dx%d @ (%d, %d)" % (width, height, left, top)
+        self.status_label.setText(msg)
+        self.tray_icon.showMessage("MapMatcher", msg, QSystemTrayIcon.Information, 3000)
+        logger.info(msg)
 
 # ==============================================================================
 # 7. 程序入口
@@ -990,6 +1101,7 @@ def main():
         # 直接执行会跨线程碰 GUI 对象（尤其 QApplication.quit()）导致随机崩溃。
         keyboard.add_hotkey(CONFIG["hotkey"], overlay.sig_trigger.emit)
         keyboard.add_hotkey(CONFIG["exit_hotkey"], overlay.sig_quit.emit)
+        keyboard.add_hotkey(CONFIG["region_hotkey"], overlay.sig_select_region.emit)
     except Exception:
         logger.exception("热键注册失败。")
         return 1
@@ -998,7 +1110,8 @@ def main():
     app.aboutToQuit.connect(overlay.worker.stop)   # 兜底：保证线程一定被回收
 
     logger.info("程序启动成功！")
-    logger.info("热键：按 %s 识别，按 %s 退出。", CONFIG["hotkey"].upper(), CONFIG["exit_hotkey"].upper())
+    logger.info("热键：按 %s 识别，按 %s 退出，按 %s 选择截图区域。",
+                CONFIG["hotkey"].upper(), CONFIG["exit_hotkey"].upper(), CONFIG["region_hotkey"].upper())
     logger.info("配置路径：%s", CONFIG_PATH)
     logger.info("地图目录：%s", MAP_FOLDER)
 

@@ -93,6 +93,15 @@ maps/full/*.jpg   整图覆盖位       ← 可选，优先于根目录同名文
 A. 抓图 vs 门模板的 MAE 排名；B. 抓图与 `maps/` 下各张完整地图的多尺度相关系数。
 若 B 面板某张图相关系数明显偏高，说明抓图区确实是地图内容。
 
+## 自定义截图区域
+
+`door_coords` 不再是写死的固定坐标。按 `F3`（或托盘右键「选择截图区域」）进入全屏框选：
+拖拽鼠标框出游戏里要识别的区域，松开后按 `Enter` 或双击确认，`Esc` 取消。
+
+确认后，框选的真实屏幕像素区域会写入 `config.json` 的 `door_coords`，并自动把
+`ref_width`/`ref_height` 更新为当前屏幕分辨率，之后按实际分辨率等比换算。无需手动改坐标，
+也不依赖某一台特定电脑。
+
 ## 测试与 CI
 
 无素材冒烟测试：用合成图验证 SIFT 引擎（以及装有 PyQt5 时的 template 模式）能正确工作，
@@ -229,6 +238,16 @@ python selftest_sift.py   # SIFT recognition (should be 100% correct)
 python selftest.py        # door-template loading & self-match (template mode)
 python probe.py           # run while the game is open to check the capture region
 ```
+
+## Selecting the capture region
+
+`door_coords` is no longer hard-coded. Press `F3` (or right-click the tray → "Select capture region")
+to enter a full-screen marquee: drag to frame the region you want to recognize, release, then press
+`Enter` or double-click to confirm (`Esc` to cancel).
+
+The framed region (real screen pixels) is written to `config.json` as `door_coords`, and
+`ref_width`/`ref_height` are updated to the current screen resolution so it auto-scales on any
+machine — no manual coordinates, no dependence on a specific PC.
 
 ## Tests & CI
 
