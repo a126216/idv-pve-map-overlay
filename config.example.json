@@ -1,0 +1,30 @@
+{
+    "hotkey": "f2",
+    "exit_hotkey": "f12",
+    "error_threshold": 12.0,
+    "top2_gap_threshold": 2.5,
+    "use_hist_equalization": false,
+    "ref_width": 2560,
+    "ref_height": 1440,
+    "door_coords": {
+        "left": 1134,
+        "top": 550,
+        "width": 583,
+        "height": 300
+    },
+    "window_pos": [
+        50,
+        600
+    ],
+    "window_size": [
+        400,
+        320
+    ],
+    "matcher_mode": "sift",
+    "sift_clahe_limit": 3.0,
+    "sift_ratio": 0.75,
+    "sift_min_good": 8,
+    "sift_min_inliers": 12,
+    "sift_ransac_threshold": 8.0,
+    "sift_nfeatures": 0
+}

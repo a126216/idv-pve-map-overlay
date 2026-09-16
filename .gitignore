@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 运行产物 / 本机信息
+*.log
+*.tmp
+# 用户专属、程序自动生成；参考见 config.example.json
+config.json
+
+# 游戏地图素材：版权归游戏厂商，不纳入版本控制
+# （maps/ 下的 *.md 说明文件保留，作为目录结构文档）
+maps/**/*.png
+maps/**/*.jpg
+maps/**/*.jpeg
+maps/**/*.bmp
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store

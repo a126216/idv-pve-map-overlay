@@ -1,0 +1,21 @@
+# MapMatcher 运行依赖
+#
+# 本机实测（2026-09-16，Windows + Python 3.14.7）：全部依赖都有 cp314 / abi3 预编译
+# wheel，不需要编译工具链，直接 pip install 即可（先前"3.14 可能装不上"的说法是错的，
+# 实测可以装）。
+#   PyQt5          5.15.11   (cp38-abi3)
+#   PyQt5-Qt5      5.15.2
+#   PyQt5-sip      12.19.0   (cp314)
+#   opencv-python  5.0.0.93  (cp37-abi3)
+#   numpy          2.5.3     (cp314)
+#   mss            10.2.0
+#   keyboard       0.13.5
+#
+# 安装：
+#     .venv\Scripts\python.exe -m pip install -r requirements.txt
+
+PyQt5>=5.15.9
+opencv-python>=4.8
+numpy>=1.24
+mss>=6.1
+keyboard>=0.13.5

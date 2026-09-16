@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install headless test deps
+        # SIFT 冒烟测试只依赖 cv2/numpy；template(MAE) 测试需要 PyQt5，
+        # 在 CI 中缺显示器会自动跳过。无需安装完整 requirements。
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy opencv-python-headless
+
+      - name: Run synthetic smoke test (no game assets needed)
+        run: python tests/test_smoke.py

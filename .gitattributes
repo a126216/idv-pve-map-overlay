@@ -1,0 +1,16 @@
+# 统一行尾：仓库内以 LF 存储，按平台 checkout。
+# 消除 Windows 上 "LF will be replaced by CRLF" 警告，保证跨平台一致性。
+* text=auto eol=lf
+
+# 明确按文本处理
+*.py text
+*.md text
+*.json text
+*.yml text
+*.spec text
+LICENSE text
+
+# 二进制资产（若有）保持原样
+*.png binary
+*.jpg binary
+*.ico binary
