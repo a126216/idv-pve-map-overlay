@@ -1,5 +1,7 @@
 # MapMatcher
 
+![CI](https://github.com/a126216/idv-pve-map-overlay/actions/workflows/ci.yml/badge.svg)
+
 按热键 → 截取游戏屏幕上一块固定区域 → 认出这是哪张地图 → 悬浮窗显示该地图整图，并在对应位置画一个红点。
 
 ## 两种识别模式
