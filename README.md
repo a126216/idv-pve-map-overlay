@@ -116,6 +116,17 @@ pyinstaller MapMatcher.spec
 
 产出 `dist/MapMatcher/` 目录；本地的 `maps/` 与 `icon.ico` 存在时会一并打入。
 
+## 发布 Release
+
+1. 按上节用 PyInstaller 构建出 `dist/MapMatcher/`；将其压缩为 `MapMatcher-win.zip`。
+2. 在 GitHub 仓库页面 → **Releases** → **Draft a new release**：
+   - 填 Tag（如 `v1.0.0`）与标题；
+   - 把 zip 作为附件上传；
+   - 正文注明「地图素材需用户自备（版权归游戏厂商，不随发行包分发）」。
+3. 点 **Publish release** 即可。
+
+> 本仓库当前为 Private，需在 **Settings → Change visibility** 改为 Public，简历链接才会对外可访问。
+
 ## 版权提示
 
 - `maps/` 下的游戏地图素材版权归游戏厂商所有，仅供个人本地使用。
@@ -241,6 +252,17 @@ pyinstaller MapMatcher.spec
 
 Produces a `dist/MapMatcher/` directory (windowed, no console). Local `maps/` and `icon.ico`
 are bundled when present.
+
+## Releasing
+
+1. Build with PyInstaller as above to get `dist/MapMatcher/`; zip it as `MapMatcher-win.zip`.
+2. On the GitHub repo page → **Releases** → **Draft a new release**:
+   - Set a Tag (e.g. `v1.0.0`) and a title;
+   - Upload the zip as an asset;
+   - Note in the body that map assets are **not** bundled (copyright belongs to the publishers).
+3. Click **Publish release**.
+
+> This repo is currently Private. Change it to Public under **Settings → Change visibility** so the link is reachable from your resume.
 
 ## License
 
