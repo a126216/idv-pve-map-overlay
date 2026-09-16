@@ -136,7 +136,7 @@ pyinstaller MapMatcher.spec
    - 正文注明「地图素材需用户自备（版权归游戏厂商，不随发行包分发）」。
 3. 点 **Publish release** 即可。
 
-> 本仓库当前为 Private，需在 **Settings → Change visibility** 改为 Public，简历链接才会对外可访问。
+> 本仓库已为 Public，简历链接可直接对外访问；如需调整可见性可在 **Settings → Change visibility** 操作。
 
 ## 版权提示
 
@@ -283,7 +283,7 @@ are bundled when present.
    - Note in the body that map assets are **not** bundled (copyright belongs to the publishers).
 3. Click **Publish release**.
 
-> This repo is currently Private. Change it to Public under **Settings → Change visibility** so the link is reachable from your resume.
+> This repo is already Public, so the resume link is publicly reachable. Adjust visibility under **Settings → Change visibility** if needed.
 
 ## License
 
