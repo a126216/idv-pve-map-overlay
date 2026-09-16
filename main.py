@@ -177,6 +177,16 @@ def cfg_float(key):
     return value
 
 
+def current_mode():
+    """解析并校验 matcher_mode；非法值或 SIFT 不可用时自动降级。"""
+    mode = str(CONFIG.get("matcher_mode", "sift")).lower()
+    if mode not in VALID_MODES:
+        mode = "sift"
+    if mode == "sift" and SiftMatcher is None:
+        mode = "template"
+    return mode
+
+
 def _read_config_file():
     """读取 config.json；文件缺失或损坏时返回空 dict，由默认值兜底。"""
     if not os.path.exists(CONFIG_PATH):
@@ -429,8 +439,9 @@ class _TemplateSet(NamedTuple):
 class MapMatcher:
     """地图模板特征缓存 + 向量化匹配。"""
 
-    def __init__(self, folder_path):
+    def __init__(self, folder_path, build_features=True):
         self._folder = folder_path
+        self._build_features = bool(build_features)
         self._lock = threading.RLock()   # 仅用于串行化 load_templates 的写入
         # 整体替换而不是分字段赋值：读取方无需加锁，也不会看到"名字与特征错位"的中间态
         self._model = _TemplateSet(stack=None, names=[], display_paths=[])
@@ -464,7 +475,14 @@ class MapMatcher:
           * maps/door/* —— 门区域裁剪图，整张直接归一化成特征，绝不再裁一次；
           * maps/*      —— 旧结构整图。若存在同名门裁剪图，它只当"显示用整图"；
                            否则按旧逻辑从整图里等比裁出门区域再识别。
+
+        build_features=False 时（SIFT 模式）只建"名字 -> 显示整图"的映射，
+        不读图也不提特征 —— SIFT 的识别完全走 sift_matcher，用不到这些模板特征。
         """
+        if not self._build_features:
+            self._load_display_map_only()
+            return len(self._model.names)
+
         door_dir = os.path.join(self._folder, DOOR_SUBDIR)
         full_dir = os.path.join(self._folder, FULL_SUBDIR)
         door_files = list_images(door_dir)
@@ -541,6 +559,21 @@ class MapMatcher:
             logger.warning("跳过 %d 个不可用模板：%s", len(skipped), "；".join(skipped))
         return len(names)
 
+    def _load_display_map_only(self):
+        """只建立 名字 -> 显示整图 的映射；不读图、不提特征（SIFT 模式足够用）。"""
+        full_dir = os.path.join(self._folder, FULL_SUBDIR)
+        mapping = {}
+        for filename in list_images(self._folder):
+            mapping[os.path.splitext(filename)[0]] = os.path.join(self._folder, filename)
+        for filename in list_images(full_dir):     # full/ 优先覆盖根目录同名文件
+            mapping[os.path.splitext(filename)[0]] = os.path.join(full_dir, filename)
+        names = sorted(mapping)
+        with self._lock:
+            self._model = _TemplateSet(stack=None, names=names,
+                                       display_paths=[mapping[n] for n in names])
+        logger.info("已建立 %d 条『地图名 -> 显示整图』映射（SIFT 模式不需要模板特征）。",
+                    len(names))
+
     @staticmethod
     def _safe_read(path, filename, skipped):
         """读图失败不抛异常，只记入 skipped 列表。"""
@@ -615,13 +648,11 @@ class MatcherWorker(QThread):
         super().__init__(parent)
         self._matcher = matcher          # 模板匹配引擎（旧方案，保留作备用/降级）
         self._sift = None                # SIFT 引擎，在线程里构建
-        self._mode = str(CONFIG.get("matcher_mode", "sift")).lower()
-        if self._mode not in VALID_MODES:
-            logger.warning("matcher_mode = %r 非法，回退为 sift。", self._mode)
-            self._mode = "sift"
-        if self._mode == "sift" and SiftMatcher is None:
-            logger.error("SIFT 模块不可用（%s），自动降级为 template 模式。", SIFT_IMPORT_ERROR)
-            self._mode = "template"
+        self._mode = current_mode()
+        if str(CONFIG.get("matcher_mode", "sift")).lower() not in VALID_MODES:
+            logger.warning("matcher_mode = %r 非法，按 sift 处理。", CONFIG.get("matcher_mode"))
+        if self._mode == "template" and SiftMatcher is None:
+            logger.error("SIFT 模块不可用（%s），已降级为 template 模式。", SIFT_IMPORT_ERROR)
         self._trigger = threading.Event()
         self._running = True
 
@@ -802,9 +833,11 @@ class RegionSelector(QWidget):
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        geo = QApplication.primaryScreen().geometry()
-        self.setGeometry(geo)
+        # 用 virtualGeometry 覆盖所有显示器，而不是只覆盖主屏
+        self.setGeometry(QApplication.primaryScreen().virtualGeometry())
         self.setCursor(Qt.CrossCursor)
+        # 无边框 Tool 窗口默认拿不到键盘焦点；不设这个 Enter/Esc 会失效，只剩双击能确认
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setWindowTitle("MapMatcher - 选择截图区域")
 
     def mousePressEvent(self, event):
@@ -836,7 +869,9 @@ class RegionSelector(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
-        rect = self._norm_rect()
+        # _norm_rect() 存的是全局坐标（要写进 door_coords），绘制前必须换算成本窗口的局部坐标；
+        # 主屏在原点时两者恰好相等，多显示器下不换算就会画错位置。
+        rect = self._norm_rect().translated(-self.pos())
         if rect.width() > 4 and rect.height() > 4:
             # 挖空选框，露出底下游戏画面，方便对齐
             painter.setCompositionMode(QPainter.CompositionMode_Clear)
@@ -860,7 +895,11 @@ class RegionSelector(QWidget):
         if rect.width() < 8 or rect.height() < 8:
             self.close()
             return
-        self._overlay.apply_region(rect.x(), rect.y(), rect.width(), rect.height())
+        # 选框是 Qt 的逻辑像素，而 door_coords 要交给 mss 用，必须是物理像素。
+        # 本机 100% 缩放下 ratio == 1.0，这里是个安全的空操作。
+        ratio = self.devicePixelRatioF() or 1.0
+        self._overlay.apply_region(int(rect.x() * ratio), int(rect.y() * ratio),
+                                   int(rect.width() * ratio), int(rect.height() * ratio))
         self.close()
 
 
@@ -1050,6 +1089,10 @@ class OverlayWindow(QWidget):
             return
         self._selector = RegionSelector(self, self)
         self._selector.show()
+        # 必须显式抢焦点，否则 keyPressEvent 收不到 Enter/Esc
+        self._selector.raise_()
+        self._selector.activateWindow()
+        self._selector.setFocus()
 
     def apply_region(self, left, top, width, height):
         """把用户框选的屏幕真实像素区域写入配置并刷新抓图缓存。"""
@@ -1069,6 +1112,8 @@ class OverlayWindow(QWidget):
         self.status_label.setText(msg)
         self.tray_icon.showMessage("MapMatcher", msg, QSystemTrayIcon.Information, 3000)
         logger.info(msg)
+        # 立刻用新区域试识别一次，用户不必再按一次热键就能看到效果
+        self.worker.trigger()
 
 # ==============================================================================
 # 7. 程序入口
@@ -1087,8 +1132,10 @@ def main():
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
 
-    matcher = MapMatcher(MAP_FOLDER)
-    if matcher.template_count == 0:
+    mode = current_mode()
+    # SIFT 模式的识别完全由 sift_matcher 负责，这里只需要"名字 -> 显示整图"的映射
+    matcher = MapMatcher(MAP_FOLDER, build_features=(mode != "sift"))
+    if mode == "template" and matcher.template_count == 0:
         logger.error("maps 目录下没有可用的地图模板。可把门区域裁剪图放进 maps/%s/，"
                      "整图放进 maps/%s/（按同名配对）；旧结构下 maps/ 里的整图也能直接用。",
                      DOOR_SUBDIR, FULL_SUBDIR)
